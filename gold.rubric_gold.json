@@ -1,0 +1,42 @@
+{
+    "total_instances": 7,
+    "submitted_instances": 7,
+    "completed_instances": 7,
+    "resolved_instances": 6,
+    "unresolved_instances": 1,
+    "empty_patch_instances": 0,
+    "error_instances": 0,
+    "completed_ids": [
+        "isomorphic-git__isomorphic-git-1779",
+        "isomorphic-git__isomorphic-git-1848",
+        "isomorphic-git__isomorphic-git-1873",
+        "isomorphic-git__isomorphic-git-1946",
+        "isomorphic-git__isomorphic-git-1949",
+        "isomorphic-git__isomorphic-git-2271",
+        "isomorphic-git__isomorphic-git-2313"
+    ],
+    "incomplete_ids": [],
+    "empty_patch_ids": [],
+    "submitted_ids": [
+        "isomorphic-git__isomorphic-git-1779",
+        "isomorphic-git__isomorphic-git-1848",
+        "isomorphic-git__isomorphic-git-1873",
+        "isomorphic-git__isomorphic-git-1946",
+        "isomorphic-git__isomorphic-git-1949",
+        "isomorphic-git__isomorphic-git-2271",
+        "isomorphic-git__isomorphic-git-2313"
+    ],
+    "resolved_ids": [
+        "isomorphic-git__isomorphic-git-1779",
+        "isomorphic-git__isomorphic-git-1848",
+        "isomorphic-git__isomorphic-git-1873",
+        "isomorphic-git__isomorphic-git-1946",
+        "isomorphic-git__isomorphic-git-1949",
+        "isomorphic-git__isomorphic-git-2271"
+    ],
+    "unresolved_ids": [
+        "isomorphic-git__isomorphic-git-2313"
+    ],
+    "error_ids": [],
+    "schema_version": 2
+}
