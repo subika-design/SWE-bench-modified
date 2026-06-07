@@ -67,6 +67,7 @@ from swebench.harness.utils import (
     EvaluationError,
     load_swebench_dataset,
     get_predictions_from_file,
+    resolve_harness_arch,
     run_threadpool,
     str2bool,
     optional_str,
@@ -350,6 +351,7 @@ def run_instances(
     instance_image_tag: str = "latest",
     env_image_tag: str = "latest",
     rewrite_reports: bool = False,
+    arch: str = "x86_64",
 ):
     """
     Run all instances for the given predictions in parallel.
@@ -372,6 +374,7 @@ def run_instances(
                 namespace=namespace,
                 instance_image_tag=instance_image_tag,
                 env_image_tag=env_image_tag,
+                arch=arch,
             ),
             instances,
         )
@@ -554,6 +557,7 @@ def main(
     env_image_tag: str = "latest",
     report_dir: str = ".",
     register_from_jsonl: str | None = None,
+    arch: str = "auto",
 ):
     """
     Run evaluation harness for the given dataset and predictions.
@@ -581,6 +585,9 @@ def main(
     if jsonl_path and Path(jsonl_path).exists():
         report = register_harness_from_jsonl(jsonl_path)
         print(report.summary())
+
+    arch = resolve_harness_arch(arch)
+    print(f"Using Docker image arch: {arch}")
 
     # load predictions as map of instance_id to prediction
     predictions = get_predictions_from_file(predictions_path, dataset_name, split)
@@ -620,6 +627,7 @@ def main(
                 namespace,
                 instance_image_tag,
                 env_image_tag,
+                arch=arch,
             )
         run_instances(
             predictions,
@@ -634,6 +642,7 @@ def main(
             instance_image_tag=instance_image_tag,
             env_image_tag=env_image_tag,
             rewrite_reports=rewrite_reports,
+            arch=arch,
         )
 
     # clean images + make final report
@@ -646,6 +655,7 @@ def main(
         namespace,
         instance_image_tag,
         env_image_tag,
+        arch=arch,
     )
 
 
@@ -750,6 +760,17 @@ if __name__ == "__main__":
         help=(
             "Optional JSONL path to register install_config specs. "
             "Defaults to --dataset_name when it is a .jsonl file."
+        ),
+    )
+    parser.add_argument(
+        "--arch",
+        type=str,
+        default="auto",
+        choices=["auto", "x86_64", "arm64"],
+        help=(
+            "Docker image CPU arch (auto detects host: arm64 on aarch64, "
+            "x86_64 on amd64). Use arm64 on Apple Silicon / ARM servers for "
+            "native Rust builds."
         ),
     )
 

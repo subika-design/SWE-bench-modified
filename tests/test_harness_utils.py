@@ -1,5 +1,7 @@
 import unittest
-from swebench.harness.utils import run_threadpool
+from argparse import ArgumentTypeError
+
+from swebench.harness.utils import resolve_harness_arch, run_threadpool
 from swebench.harness.test_spec.python import clean_environment_yml, clean_requirements
 
 
@@ -195,3 +197,24 @@ class UtilTests(unittest.TestCase):
         )
         cleaned = clean_requirements(requirements)
         self.assertEqual(cleaned, expected_requirements)
+
+
+class HarnessArchTests(unittest.TestCase):
+    def test_resolve_harness_arch_explicit(self):
+        self.assertEqual(resolve_harness_arch("arm64"), "arm64")
+        self.assertEqual(resolve_harness_arch("aarch64"), "arm64")
+        self.assertEqual(resolve_harness_arch("x86_64"), "x86_64")
+        self.assertEqual(resolve_harness_arch("amd64"), "x86_64")
+
+    def test_resolve_harness_arch_auto_on_aarch64_host(self):
+        import platform
+
+        if platform.machine().lower() in {"aarch64", "arm64"}:
+            self.assertEqual(resolve_harness_arch("auto"), "arm64")
+            self.assertEqual(resolve_harness_arch(None), "arm64")
+        else:
+            self.assertEqual(resolve_harness_arch("auto"), "x86_64")
+
+    def test_resolve_harness_arch_invalid(self):
+        with self.assertRaises(ArgumentTypeError):
+            resolve_harness_arch("mips")

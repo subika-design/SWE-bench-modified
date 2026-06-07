@@ -1,4 +1,5 @@
 import json
+import platform
 import re
 import requests
 import traceback
@@ -20,6 +21,32 @@ from swebench.harness.constants import (
 from unidiff import PatchSet
 
 load_dotenv()
+
+HARNESS_ARCH_CHOICES = ("auto", "x86_64", "arm64")
+
+
+def resolve_harness_arch(arch: str | None = None) -> str:
+    """
+    Resolve Docker image architecture for harness builds.
+
+    ``auto`` (default) maps the host CPU to ``arm64`` on aarch64 hosts and
+    ``x86_64`` elsewhere so Rust/native builds avoid QEMU when possible.
+    """
+    raw = str(arch or "auto").strip().lower()
+    if raw in {"", "auto"}:
+        machine = platform.machine().lower()
+        if machine in {"aarch64", "arm64"}:
+            return "arm64"
+        if machine in {"x86_64", "amd64"}:
+            return "x86_64"
+        return "x86_64"
+    if raw in {"aarch64", "arm64"}:
+        return "arm64"
+    if raw in {"x86_64", "amd64", "x86"}:
+        return "x86_64"
+    raise ArgumentTypeError(
+        f"Invalid --arch {arch!r}; expected one of: {', '.join(HARNESS_ARCH_CHOICES)}"
+    )
 
 
 class EvaluationError(Exception):

@@ -9,7 +9,12 @@ from swebench.harness.docker_build import build_instance_images
 from swebench.harness.docker_utils import list_images
 from swebench.harness.jsonl_register import register_harness_from_jsonl
 from swebench.harness.test_spec.test_spec import make_test_spec
-from swebench.harness.utils import load_swebench_dataset, str2bool, optional_str
+from swebench.harness.utils import (
+    load_swebench_dataset,
+    optional_str,
+    resolve_harness_arch,
+    str2bool,
+)
 
 
 def filter_dataset_to_build(
@@ -20,6 +25,7 @@ def filter_dataset_to_build(
     namespace: str = None,
     tag: str = None,
     env_image_tag: str = None,
+    arch: str = "x86_64",
 ):
     """
     Filter the dataset to only include instances that need to be built.
@@ -55,6 +61,7 @@ def filter_dataset_to_build(
             namespace=namespace,
             instance_image_tag=tag,
             env_image_tag=env_image_tag,
+            arch=arch,
         )
         if force_rebuild:
             data_to_build.append(instance)
@@ -75,6 +82,7 @@ def main(
     tag,
     env_image_tag,
     register_from_jsonl: str | None = None,
+    arch: str = "auto",
 ):
     """
     Build Docker images for the specified instances.
@@ -97,6 +105,9 @@ def main(
         report = register_harness_from_jsonl(jsonl_path)
         print(report.summary())
 
+    arch = resolve_harness_arch(arch)
+    print(f"Using Docker image arch: {arch}")
+
     # Set open file limit
     resource.setrlimit(resource.RLIMIT_NOFILE, (open_file_limit, open_file_limit))
     client = docker.from_env()
@@ -104,7 +115,14 @@ def main(
     # Filter out instances that were not specified
     dataset = load_swebench_dataset(dataset_name, split)
     dataset = filter_dataset_to_build(
-        dataset, instance_ids, client, force_rebuild, namespace, tag, env_image_tag
+        dataset,
+        instance_ids,
+        client,
+        force_rebuild,
+        namespace,
+        tag,
+        env_image_tag,
+        arch=arch,
     )
 
     if len(dataset) == 0:
@@ -120,6 +138,7 @@ def main(
         namespace=namespace,
         tag=tag,
         env_image_tag=env_image_tag,
+        arch=arch,
     )
     print(f"Successfully built {len(successful)} images")
     print(f"Failed to build {len(failed)} images")
@@ -170,6 +189,16 @@ if __name__ == "__main__":
         help=(
             "Optional JSONL path to register install_config specs before building. "
             "Defaults to --dataset_name when it is a .jsonl file."
+        ),
+    )
+    parser.add_argument(
+        "--arch",
+        type=str,
+        default="auto",
+        choices=["auto", "x86_64", "arm64"],
+        help=(
+            "Docker image CPU arch (auto detects host: arm64 on aarch64, "
+            "x86_64 on amd64)."
         ),
     )
     args = parser.parse_args()
