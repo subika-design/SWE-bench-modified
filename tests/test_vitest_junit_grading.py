@@ -79,6 +79,101 @@ def test_parse_junit_xml_file_outcomes(tmp_path: Path):
     assert status["tests/a.test.js::t2"] == TestStatus.FAILED.value
 
 
+def test_mocha_junit_nodeid_three_part(tmp_path: Path):
+    repo = tmp_path / "testbed"
+    test_file = repo / "__integration__/logging/platform.test.js"
+    test_file.parent.mkdir(parents=True)
+    test_file.write_text("// test\n", encoding="utf-8")
+
+    xml = tmp_path / "mocha.xml"
+    xml.write_text(
+        '<?xml version="1.0"?>'
+        '<testsuites name="Mocha Tests">'
+        '<testsuite name="platform" file="/testbed/__integration__/logging/platform.test.js">'
+        '<testcase classname="should warn and notify users of transform errors" '
+        'name="integration logging platform should warn and notify users of transform errors"/>'
+        "</testsuite>"
+        "</testsuites>",
+        encoding="utf-8",
+    )
+
+    status = parse_junit_xml_file(xml, repo)
+    key = (
+        "__integration__/logging/platform.test.js::"
+        "should warn and notify users of transform errors::"
+        "integration logging platform should warn and notify users of transform errors"
+    )
+    assert status[key] == TestStatus.PASSED.value
+
+
+def test_mocha_junit_nodeid_two_part_when_classname_equals_name(tmp_path: Path):
+    repo = tmp_path / "testbed"
+    test_file = repo / "__tests__/foo.test.js"
+    test_file.parent.mkdir(parents=True)
+    test_file.write_text("// test\n", encoding="utf-8")
+
+    xml = tmp_path / "mocha.xml"
+    xml.write_text(
+        '<?xml version="1.0"?>'
+        '<testsuites name="Mocha Tests">'
+        '<testsuite name="suite" file="/testbed/__tests__/foo.test.js">'
+        '<testcase classname="should work" name="should work"/>'
+        "</testsuite>"
+        "</testsuites>",
+        encoding="utf-8",
+    )
+
+    status = parse_junit_xml_file(xml, repo)
+    assert status["__tests__/foo.test.js::should work"] == TestStatus.PASSED.value
+
+
+def test_mocha_junit_nested_suites_inherit_file(tmp_path: Path):
+    repo = tmp_path / "testbed"
+    test_file = repo / "__tests__/transform/map.test.js"
+    test_file.parent.mkdir(parents=True)
+    test_file.write_text("// test\n", encoding="utf-8")
+
+    xml = tmp_path / "mocha.xml"
+    xml.write_text(
+        '<?xml version="1.0"?>'
+        '<testsuites name="Mocha Tests">'
+        '<testsuite name="transform" file="/testbed/__tests__/transform/map.test.js">'
+        '<testsuite name="map">'
+        '<testcase classname="handles and collects errors from transformations" '
+        'name="transform map handles and collects errors from transformations"/>'
+        "</testsuite>"
+        "</testsuite>"
+        "</testsuites>",
+        encoding="utf-8",
+    )
+
+    status = parse_junit_xml_file(xml, repo)
+    key = (
+        "__tests__/transform/map.test.js::"
+        "handles and collects errors from transformations::"
+        "transform map handles and collects errors from transformations"
+    )
+    assert status[key] == TestStatus.PASSED.value
+
+
+def test_mocha_junit_parse_style_dictionary_1460_log():
+    log_xml = (
+        Path(__file__).resolve().parents[1]
+        / "logs/run_evaluation/rubric_gold/gold"
+        / "style-dictionary__style-dictionary-1460/vitest-junit.xml"
+    )
+    if not log_xml.is_file():
+        return
+
+    status = parse_junit_xml_file(log_xml, Path("/testbed"))
+    key = (
+        "__integration__/logging/platform.test.js::"
+        "should warn and notify users of transform errors::"
+        "integration logging platform should warn and notify users of transform errors"
+    )
+    assert status[key] == TestStatus.PASSED.value
+
+
 def test_should_use_junit_xml_file():
     from swebench.harness.log_parsers.junit_xml import should_use_junit_xml_file
 
@@ -93,7 +188,40 @@ def test_should_use_junit_xml_file():
             )
         }
     )
+    assert should_use_junit_xml_file(
+        {
+            "test_cmd": (
+                "cd /testbed && npx mocha -r mocha-hooks.mjs "
+                "--reporter __MOCHA_JUNIT_REPORTER__ "
+                "--reporter-options mochaFile=__JUNIT_OUT__ t.js"
+            )
+        }
+    )
     assert not should_use_junit_xml_file({"test_cmd": "npx mocha -R tap"})
+
+
+def test_wrap_eval_commands_for_mocha_junit():
+    from swebench.harness.constants import END_TEST_OUTPUT, START_TEST_OUTPUT
+    from swebench.harness.test_spec.javascript import (
+        _wrap_eval_commands_for_mocha_junit,
+    )
+
+    specs = {
+        "test_cmd": (
+            "cd /testbed && npx mocha --reporter __MOCHA_JUNIT_REPORTER__ "
+            "--reporter-options mochaFile=__JUNIT_OUT__ t.js"
+        )
+    }
+    eval_commands = [
+        f": '{START_TEST_OUTPUT}'",
+        "cd /testbed && npx mocha --reporter __MOCHA_JUNIT_REPORTER__ "
+        "--reporter-options mochaFile=__JUNIT_OUT__ t.js",
+        f": '{END_TEST_OUTPUT}'",
+    ]
+    wrapped = _wrap_eval_commands_for_mocha_junit(eval_commands, specs)
+    assert "__MOCHA_JUNIT_REPORTER__" not in wrapped[1]
+    assert "mocha-junit-reporter" in wrapped[1]
+    assert "__JUNIT_OUT__" in wrapped[1]
 
 
 def test_should_use_vitest_junit_xml():
@@ -126,23 +254,6 @@ def test_default_log_parser_javascript_vitest():
         {"test_cmd": "npx vitest run --reporter=junit --outputFile=__JUNIT_OUT__"},
     )
     assert parser.__name__ == "parse_log_javascript_jsonl"
-
-
-def test_parse_real_vitest_junit_prototype_pollution_keys():
-    xml = Path(
-        "/Users/subika/Downloads/swe-bench-taskgen/SWE-bench-modified/logs/run_evaluation/"
-        "rubric_gold/gold/axios__axios-10922/vitest-junit.xml"
-    )
-    if not xml.is_file():
-        return
-    exp = (
-        "tests/unit/prototypePollution.test.js::Prototype Pollution Protection > "
-        "resolveConfig params and paramsSerializer gadget > "
-        "should not inherit polluted params via resolveConfig"
-    )
-    m = parse_junit_xml_file(xml, Path("/testbed"))
-    assert exp in m
-    assert m[exp] == TestStatus.PASSED.value
 
 
 def test_get_logs_eval_reads_jest_junit_reports_dir(tmp_path: Path):

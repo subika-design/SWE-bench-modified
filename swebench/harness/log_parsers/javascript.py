@@ -4,6 +4,7 @@ from swebench.harness.constants import MAP_REPO_VERSION_TO_SPECS, TestStatus
 from swebench.harness.log_parsers.junit_xml import (
     should_use_vitest_junit_xml,
     specs_use_jest_junit,
+    specs_use_mocha_junit,
 )
 from swebench.harness.test_spec.test_spec import TestSpec
 from swebench.harness.utils import ansi_escape
@@ -321,6 +322,8 @@ def parse_log_javascript_jsonl(log: str, test_spec: TestSpec) -> dict[str, str]:
         if parsed:
             return parsed
         return parse_log_jest_json(log, test_spec)
+    if specs_use_mocha_junit(test_cmd):
+        return parse_log_tap(log, test_spec)
     if test_cmd and "vitest" in str(test_cmd).lower():
         return parse_log_vitest(log, test_spec)
     if test_cmd and "jest" in str(test_cmd).lower():

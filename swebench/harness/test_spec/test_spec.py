@@ -22,6 +22,7 @@ from swebench.harness.test_spec.create_scripts import (
     make_env_script_list,
     make_eval_script_list,
 )
+from swebench.harness.test_key_normalization import normalize_test_nodeid
 
 
 @dataclass
@@ -203,6 +204,10 @@ def make_test_spec(
 
     pass_to_pass = _from_json_or_obj("PASS_TO_PASS")
     fail_to_pass = _from_json_or_obj("FAIL_TO_PASS")
+    if isinstance(pass_to_pass, list):
+        pass_to_pass = [normalize_test_nodeid(t) for t in pass_to_pass]
+    if isinstance(fail_to_pass, list):
+        fail_to_pass = [normalize_test_nodeid(t) for t in fail_to_pass]
 
     env_name = "testbed"
     repo_directory = f"/{env_name}"

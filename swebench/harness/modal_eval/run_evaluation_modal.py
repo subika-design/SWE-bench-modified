@@ -277,20 +277,26 @@ def run_instance_modal(
             logger.info("Failed to apply patch to container, trying again...")
 
             apply_patch_output, returncode = runner.exec(
-                "cd /testbed && patch --batch --fuzz=5 -p1 -i /tmp/patch.diff",
+                "cd /testbed && git apply --3way -v /tmp/patch.diff",
             )
 
-            if returncode != 0:
-                logger.info(f"{APPLY_PATCH_FAIL}:\n{apply_patch_output}")
-                raise EvaluationError(
-                    instance_id,
-                    f"{APPLY_PATCH_FAIL}:\n{apply_patch_output}",
-                    logger,
-                )
-            else:
-                logger.info(f"{APPLY_PATCH_PASS}:\n{apply_patch_output}")
-        else:
-            logger.info(f"{APPLY_PATCH_PASS}:\n{apply_patch_output}")
+        if returncode != 0:
+            logger.info("Failed to apply patch with git apply --3way, trying patch...")
+
+            apply_patch_output, returncode = runner.exec(
+                "cd /testbed && patch --batch --forward --fuzz=5 -p1 -i /tmp/patch.diff",
+            )
+
+        from swebench.harness.run_evaluation import patch_apply_output_ok
+
+        if returncode != 0 or not patch_apply_output_ok(apply_patch_output):
+            logger.info(f"{APPLY_PATCH_FAIL}:\n{apply_patch_output}")
+            raise EvaluationError(
+                instance_id,
+                f"{APPLY_PATCH_FAIL}:\n{apply_patch_output}",
+                logger,
+            )
+        logger.info(f"{APPLY_PATCH_PASS}:\n{apply_patch_output}")
 
         # Get git diff before running eval script
         git_diff_output_before, returncode = runner.exec(

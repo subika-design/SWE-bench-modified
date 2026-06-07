@@ -34,7 +34,9 @@ PREDICTIONS="path of pred json from the model"
 python -m swebench.harness.prepare_images \
   --dataset_name "$DATASET" \
   --max_workers 1 \
-  --namespace ""
+  --namespace "" \
+  --env_image_tag latest \
+  --tag latest 
 ```
 
 Build logs go to `logs/build_images/`.

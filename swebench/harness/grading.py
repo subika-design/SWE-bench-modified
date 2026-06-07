@@ -35,18 +35,25 @@ from swebench.harness.log_parsers.junit_xml import (
     parse_junit_xml_file,
     should_use_junit_xml_file,
 )
+from swebench.harness.test_key_normalization import (
+    build_status_lookup,
+    resolve_test_status,
+    test_failed_normalized,
+    test_passed_normalized,
+)
 
 
 # MARK: Utility functions
-def test_passed(case: str, sm: dict[str, str]) -> bool:
-    return case in sm and sm[case] in [TestStatus.PASSED.value, TestStatus.XFAIL.value]
+def test_passed(case: str, sm: dict[str, str], lookup: dict[str, str] | None = None) -> bool:
+    if lookup is None:
+        lookup = build_status_lookup(sm)
+    return test_passed_normalized(case, sm, lookup)
 
 
-def test_failed(case: str, sm: dict[str, str]) -> bool:
-    return case not in sm or sm[case] in [
-        TestStatus.FAILED.value,
-        TestStatus.ERROR.value,
-    ]
+def test_failed(case: str, sm: dict[str, str], lookup: dict[str, str] | None = None) -> bool:
+    if lookup is None:
+        lookup = build_status_lookup(sm)
+    return test_failed_normalized(case, sm, lookup)
 
 
 # MARK: Evaluation report functions
@@ -172,18 +179,17 @@ def get_eval_tests_report(
     - Pass-Fail (P2F) + P: Not considered
     """
 
-    def check_pass_and_fail(test_case, eval_status_map, success, failed):
-        if test_passed(test_case, eval_status_map):
-            # Assume silent success for now (test case not in eval_sm)
+    status_lookup = build_status_lookup(eval_status_map)
+
+    def check_pass_and_fail(test_case, success, failed):
+        if test_passed(test_case, eval_status_map, status_lookup):
             success.append(test_case)
-        elif test_failed(test_case, eval_status_map):
+        elif test_failed(test_case, eval_status_map, status_lookup):
             failed.append(test_case)
 
-    def check_fail_only(test_case, eval_status_map, success, failed):
-        if (
-            test_case in eval_status_map
-            and eval_status_map[test_case] == TestStatus.FAILED.value
-        ):
+    def check_fail_only(test_case, success, failed):
+        status = resolve_test_status(test_case, eval_status_map, lookup=status_lookup)
+        if status == TestStatus.FAILED.value:
             failed.append(test_case)
         else:
             success.append(test_case)
@@ -196,13 +202,13 @@ def get_eval_tests_report(
     f2p_success = []
     f2p_failure = []
     for test_case in gold_results[FAIL_TO_PASS]:
-        check_test_case(test_case, eval_status_map, f2p_success, f2p_failure)
+        check_test_case(test_case, f2p_success, f2p_failure)
 
     # Calculate maintenance metrics
     p2p_success = []
     p2p_failure = []
     for test_case in gold_results[PASS_TO_PASS]:
-        check_test_case(test_case, eval_status_map, p2p_success, p2p_failure)
+        check_test_case(test_case, p2p_success, p2p_failure)
 
     results = {
         FAIL_TO_PASS: {
@@ -222,11 +228,11 @@ def get_eval_tests_report(
     if calculate_to_fail:
         # Calculate "extra credit" metrics
         for test_case in gold_results[FAIL_TO_FAIL]:
-            check_test_case(test_case, eval_status_map, f2f_success, f2f_failure)
+            check_test_case(test_case, f2f_success, f2f_failure)
 
         # Calculate not considered metrics
         for test_case in gold_results[PASS_TO_FAIL]:
-            check_test_case(test_case, eval_status_map, p2f_success, p2f_failure)
+            check_test_case(test_case, p2f_success, p2f_failure)
 
     results.update(
         {

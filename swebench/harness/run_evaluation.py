@@ -75,8 +75,19 @@ from swebench.harness.utils import (
 GIT_APPLY_CMDS = [
     "git apply --verbose",
     "git apply --verbose --reject",
-    "patch --batch --fuzz=5 -p1 -i",
+    "git apply --3way --verbose",
+    "patch --batch --forward --fuzz=5 -p1 -i",
 ]
+
+_PATCH_REVERSED_MARKERS = (
+    "Reversed (or previously applied) patch detected",
+    "Assuming -R.",
+)
+
+
+def patch_apply_output_ok(output: str) -> bool:
+    """Reject GNU patch reverse-application heuristics that undo the gold patch."""
+    return not any(marker in output for marker in _PATCH_REVERSED_MARKERS)
 
 
 def run_instance(
@@ -176,23 +187,32 @@ def run_instance(
 
         # Attempt to apply patch to container (TODO: FIX THIS)
         applied_patch = False
+        apply_output = ""
         for git_apply_cmd in GIT_APPLY_CMDS:
             val = container.exec_run(
                 f"{git_apply_cmd} {DOCKER_PATCH}",
                 workdir=DOCKER_WORKDIR,
                 user=DOCKER_USER,
             )
-            if val.exit_code == 0:
-                logger.info(f"{APPLY_PATCH_PASS}:\n{val.output.decode(UTF8)}")
+            apply_output = val.output.decode(UTF8)
+            if val.exit_code == 0 and patch_apply_output_ok(apply_output):
+                logger.info(f"{APPLY_PATCH_PASS}:\n{apply_output}")
                 applied_patch = True
                 break
             else:
-                logger.info(f"Failed to apply patch to container: {git_apply_cmd}")
+                reason = (
+                    "patch reverse detected"
+                    if val.exit_code == 0
+                    else f"exit {val.exit_code}"
+                )
+                logger.info(
+                    f"Failed to apply patch to container: {git_apply_cmd} ({reason})"
+                )
         if not applied_patch:
-            logger.info(f"{APPLY_PATCH_FAIL}:\n{val.output.decode(UTF8)}")
+            logger.info(f"{APPLY_PATCH_FAIL}:\n{apply_output}")
             raise EvaluationError(
                 instance_id,
-                f"{APPLY_PATCH_FAIL}:\n{val.output.decode(UTF8)}",
+                f"{APPLY_PATCH_FAIL}:\n{apply_output}",
                 logger,
             )
 

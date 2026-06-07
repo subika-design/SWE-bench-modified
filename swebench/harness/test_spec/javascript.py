@@ -94,6 +94,17 @@ JEST_JUNIT_EVAL_PREFIX = (
 )
 
 
+def _inject_jest_test_timeout(cmd: str, timeout_ms: int = 120_000) -> str:
+    """Raise default Jest timeout for slow integration tests (e.g. git clone)."""
+    if "jest" not in cmd.lower() or "--testTimeout" in cmd:
+        return cmd
+    if " npx jest" in cmd or cmd.strip().startswith("npx jest"):
+        return cmd.replace("npx jest", f"npx jest --testTimeout={timeout_ms}", 1)
+    if " jest" in cmd:
+        return cmd.replace(" jest", f" jest --testTimeout={timeout_ms}", 1)
+    return cmd
+
+
 def _wrap_eval_commands_for_jest_junit(eval_commands: list, specs: dict) -> list:
     """Export jest-junit env vars so JUnit labels match rubric FAIL_TO_PASS keys."""
     from swebench.harness.log_parsers.junit_xml import specs_use_jest_junit
@@ -111,7 +122,39 @@ def _wrap_eval_commands_for_jest_junit(eval_commands: list, specs: dict) -> list
     for i in range(i0, i1):
         cmd = out[i]
         if "jest" in cmd.lower() and JEST_JUNIT_EVAL_PREFIX not in cmd:
+            cmd = _inject_jest_test_timeout(cmd)
             out[i] = f"{JEST_JUNIT_EVAL_PREFIX} && {cmd}"
+    return out
+
+
+def _substitute_mocha_junit_reporter(cmd: str) -> str:
+    from swebench.harness.log_parsers.junit_xml import (
+        MOCHA_JUNIT_REPORTER_MODULE,
+        MOCHA_JUNIT_REPORTER_PLACEHOLDER,
+    )
+
+    if MOCHA_JUNIT_REPORTER_PLACEHOLDER in cmd:
+        return cmd.replace(MOCHA_JUNIT_REPORTER_PLACEHOLDER, MOCHA_JUNIT_REPORTER_MODULE)
+    return cmd
+
+
+def _wrap_eval_commands_for_mocha_junit(eval_commands: list, specs: dict) -> list:
+    """Resolve Mocha JUnit reporter placeholder in rubric ``test_cmd`` strings."""
+    from swebench.harness.log_parsers.junit_xml import specs_use_mocha_junit
+
+    if not specs_use_mocha_junit(specs.get("test_cmd")):
+        return eval_commands
+    start_marker = f": '{START_TEST_OUTPUT}'"
+    end_marker = f": '{END_TEST_OUTPUT}'"
+    try:
+        i0 = eval_commands.index(start_marker) + 1
+        i1 = eval_commands.index(end_marker)
+    except ValueError:
+        return eval_commands
+    out = list(eval_commands)
+    for i in range(i0, i1):
+        if "mocha" in out[i].lower():
+            out[i] = _substitute_mocha_junit_reporter(out[i])
     return out
 
 
@@ -132,4 +175,5 @@ def make_eval_script_list_js(
         idx_start_test_out = eval_commands.index(f": '{START_TEST_OUTPUT}'")
         idx_end_test_out = eval_commands.index(f": '{END_TEST_OUTPUT}'")
         eval_commands[idx_start_test_out + 1 : idx_end_test_out] = test_commands
-    return _wrap_eval_commands_for_jest_junit(eval_commands, specs)
+    eval_commands = _wrap_eval_commands_for_jest_junit(eval_commands, specs)
+    return _wrap_eval_commands_for_mocha_junit(eval_commands, specs)

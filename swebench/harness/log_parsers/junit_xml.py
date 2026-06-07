@@ -133,6 +133,60 @@ def _classname_to_pytest_prefix(classname: str, repo_root: Path) -> tuple[str, s
     return resolved or rel, ""
 
 
+def _local_tag(el: ET.Element) -> str:
+    tag = el.tag
+    return tag.split("}")[-1] if "}" in tag else tag
+
+
+def _walk_testcases_with_suite_file(root: ET.Element):
+    """Yield ``(testcase, nearest_ancestor_testsuite_file)`` depth-first."""
+
+    def walk_suite(suite: ET.Element, inherited_file: str | None):
+        suite_file = suite.attrib.get("file") or inherited_file
+        for child in suite:
+            tag = _local_tag(child)
+            if tag == "testcase":
+                yield child, suite_file
+            elif tag == "testsuite":
+                yield from walk_suite(child, suite_file)
+
+    root_tag = _local_tag(root)
+    if root_tag == "testsuites":
+        for child in root:
+            if _local_tag(child) == "testsuite":
+                yield from walk_suite(child, None)
+    elif root_tag == "testsuite":
+        yield from walk_suite(root, None)
+
+
+def _is_mocha_style_junit_case(
+    case: ET.Element,
+    suite_file: str | None,
+    repo_root: Path,
+) -> bool:
+    if not suite_file or case.attrib.get("file"):
+        return False
+    rel = _junit_file_to_repo_relpath(suite_file, repo_root)
+    if not rel or not _is_js_test_relpath(rel):
+        return False
+    classname = case.attrib.get("classname", "")
+    if _rel_from_junit_classname(classname, repo_root):
+        return False
+    return bool(classname and case.attrib.get("name"))
+
+
+def _mocha_style_nodeid(case: ET.Element, suite_file: str, repo_root: Path) -> str:
+    rel = _junit_file_to_repo_relpath(suite_file, repo_root)
+    resolved = _resolve_repo_test_path(repo_root, rel)
+    if resolved:
+        rel = resolved
+    classname = case.attrib.get("classname", "").strip()
+    name = case.attrib.get("name", "").strip()
+    if classname and classname != name:
+        return f"{rel}::{classname}::{name}"
+    return f"{rel}::{name}"
+
+
 def _case_outcome(case: ET.Element) -> str:
     for child in case:
         tag = child.tag.split("}")[-1] if "}" in child.tag else child.tag
@@ -143,15 +197,27 @@ def _case_outcome(case: ET.Element) -> str:
     return TestStatus.PASSED.value
 
 
-def junit_case_to_nodeid(case: ET.Element, repo_root: Path) -> str:
+def junit_case_to_nodeid(
+    case: ET.Element,
+    repo_root: Path,
+    *,
+    suite_file: str | None = None,
+) -> str:
     """
     Test label aligned with pr_to_swe_rebench_jsonl / Vitest JUnit output.
 
     Vitest often sets ``name`` to the full ``suite > nested > case`` chain and
     ``file`` to the repo-relative path, yielding ``path::suite > nested > case``.
+
+    Mocha JUnit reporter puts ``file`` on ancestor ``testsuite`` elements and uses
+    ``classname`` for the short test title, yielding
+    ``path::short_title::full_title``.
     """
-    name = case.attrib.get("name", "")
-    classname = case.attrib.get("classname", "")
+    if _is_mocha_style_junit_case(case, suite_file, repo_root):
+        return _mocha_style_nodeid(case, suite_file, repo_root)
+
+    name = case.attrib.get("name", "").strip()
+    classname = case.attrib.get("classname", "").strip()
     file_a = case.attrib.get("file")
     rel_s = ""
     qual = ""
@@ -194,8 +260,8 @@ def parse_junit_xml_file(path: Path, repo_root: Path) -> dict[str, str]:
     if root is None:
         return {}
     out: dict[str, str] = {}
-    for case in _iter_junit_elements(root, "testcase"):
-        nid = junit_case_to_nodeid(case, repo_root)
+    for case, suite_file in _walk_testcases_with_suite_file(root):
+        nid = junit_case_to_nodeid(case, repo_root, suite_file=suite_file)
         out[nid] = _case_outcome(case)
     return out
 
@@ -211,6 +277,8 @@ def parse_junit_xml_dir(reports_root: Path, repo_root: Path) -> dict[str, str]:
 
 
 JUNIT_OUT_PLACEHOLDER = "__JUNIT_OUT__"
+MOCHA_JUNIT_REPORTER_PLACEHOLDER = "__MOCHA_JUNIT_REPORTER__"
+MOCHA_JUNIT_REPORTER_MODULE = "mocha-junit-reporter"
 
 
 def infer_vitest_junit_container_path(test_cmd: str | list[str] | None) -> str:
@@ -273,9 +341,11 @@ def should_use_vitest_junit_xml(specs: dict) -> bool:
 
 
 def should_use_junit_xml_file(specs: dict) -> bool:
-    """True when rubric tasks emit JUnit XML (Vitest or Jest+jest-junit)."""
-    return should_use_vitest_junit_xml(specs) or specs_use_jest_junit(
-        specs.get("test_cmd")
+    """True when rubric tasks emit JUnit XML (Vitest, Jest+jest-junit, or Mocha)."""
+    return (
+        should_use_vitest_junit_xml(specs)
+        or specs_use_jest_junit(specs.get("test_cmd"))
+        or specs_use_mocha_junit(specs.get("test_cmd"))
     )
 
 
@@ -284,3 +354,21 @@ def specs_use_jest_junit(test_cmd: str | list[str] | None) -> bool:
         test_cmd = " ".join(str(c) for c in test_cmd)
     low = str(test_cmd or "").lower()
     return "jest" in low and ("jest-junit" in low or "outputfile" in low.replace(" ", ""))
+
+
+def specs_use_mocha_junit(test_cmd: str | list[str] | None) -> bool:
+    """True when ``test_cmd`` runs Mocha with JUnit output (rubric JSONL layout)."""
+    if isinstance(test_cmd, list):
+        test_cmd = " ".join(str(c) for c in test_cmd)
+    low = str(test_cmd or "").lower()
+    if "mocha" not in low:
+        return False
+    compact = low.replace(" ", "")
+    return (
+        MOCHA_JUNIT_REPORTER_PLACEHOLDER.lower() in low
+        or MOCHA_JUNIT_REPORTER_MODULE in low
+        or (
+            "mochafile" in compact
+            and JUNIT_OUT_PLACEHOLDER.lower() in low
+        )
+    )

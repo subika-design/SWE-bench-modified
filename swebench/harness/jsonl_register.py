@@ -236,6 +236,14 @@ def default_log_parser(language: str, specs: dict[str, Any]):
             return parse_log_vitest
         if "jest" in test_cmd:
             return parse_log_jest
+        if "mocha" in test_cmd:
+            from swebench.harness.log_parsers.junit_xml import specs_use_mocha_junit
+
+            if specs_use_mocha_junit(specs.get("test_cmd")):
+                return parse_log_javascript_jsonl
+            from swebench.harness.log_parsers.javascript import parse_log_tap
+
+            return parse_log_tap
         return parse_log_javascript_jsonl
     if lang == "ruby":
         from swebench.harness.log_parsers.ruby import parse_log_minitest
