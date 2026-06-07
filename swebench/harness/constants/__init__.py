@@ -120,6 +120,7 @@ NON_TEST_EXTS = [
     ".yml",
     ".yaml",
     ".toml",
+    ".output",
 ]
 SWE_BENCH_URL_RAW = "https://raw.githubusercontent.com/"
 DEFAULT_DOCKER_SPECS = {

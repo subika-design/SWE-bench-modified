@@ -113,10 +113,12 @@ def get_logs_eval(
         if should_use_junit_xml_file(specs):
             junit_host = junit_path_from_test_log(content, log_dir)
             if junit_host and junit_host.is_file():
-                status_map = parse_junit_xml_file(junit_host, Path("/testbed"))
+                status_map = parse_junit_xml_file(
+                    junit_host, Path("/testbed"), specs=specs
+                )
             elif (log_dir / LOG_VITEST_JUNIT).is_file():
                 status_map = parse_junit_xml_file(
-                    log_dir / LOG_VITEST_JUNIT, Path("/testbed")
+                    log_dir / LOG_VITEST_JUNIT, Path("/testbed"), specs=specs
                 )
 
         if not status_map:
@@ -139,6 +141,13 @@ def get_logs_eval(
             xml_map = parse_junit_xml_dir(surefire_path, Path("/testbed"))
             if xml_map:
                 status_map = xml_map
+
+        if not status_map and should_use_junit_xml_file(specs):
+            junit_out = log_dir / "__JUNIT_OUT__"
+            if junit_out.is_file():
+                status_map = parse_junit_xml_file(
+                    junit_out, Path("/testbed"), specs=specs
+                )
 
         if not status_map and should_use_junit_xml_file(specs):
             jest_reports = log_dir / LOG_JEST_JUNIT_REPORTS

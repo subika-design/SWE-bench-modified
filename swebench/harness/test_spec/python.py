@@ -228,6 +228,48 @@ def get_requirements(instance: SWEbenchInstance) -> str:
     return requirements_text
 
 
+def _is_pygments_golden_output(path: str) -> bool:
+    """Pygments examplefiles golden artifacts are not pytest collection targets."""
+    return str(path or "").replace("\\", "/").lower().endswith(".output")
+
+
+def _is_pygments_data_test_path(path: str) -> bool:
+    p = str(path or "").replace("\\", "/")
+    low = p.lower()
+    if _is_pygments_golden_output(p):
+        return False
+    return low.startswith("tests/snippets/") or low.startswith("tests/examplefiles/")
+
+
+def pytest_cmd_has_scoped_paths(cmd: str | list[str]) -> bool:
+    """True when ``test_cmd`` already names concrete pytest collection targets."""
+    if isinstance(cmd, list):
+        cmd = " ".join(str(c) for c in cmd)
+    s = str(cmd or "").strip()
+    if not s:
+        return False
+    skip = frozenset(
+        {
+            "pytest",
+            "python3",
+            "python",
+            "-m",
+            "||",
+            "&&",
+            "tests",
+            "tests/",
+            "test",
+            "test/",
+        }
+    )
+    for token in s.split():
+        if not token or token.startswith("-") or token.lower() in skip:
+            continue
+        if token.endswith(".py") or _is_pygments_data_test_path(token):
+            return True
+    return False
+
+
 def get_test_directives(instance: SWEbenchInstance) -> list:
     """
     Get test directives from the test_patch of a task instance
@@ -246,7 +288,10 @@ def get_test_directives(instance: SWEbenchInstance) -> list:
     test_patch = instance["test_patch"]
     directives = re.findall(diff_pat, test_patch)
     directives = [
-        d for d in directives if not any(d.endswith(ext) for ext in NON_TEST_EXTS)
+        d
+        for d in directives
+        if not any(d.endswith(ext) for ext in NON_TEST_EXTS)
+        and not _is_pygments_golden_output(d)
     ]
 
     # For Django tests, remove extension + "tests/" prefix and convert slashes to dots (module referencing)
@@ -428,14 +473,15 @@ def make_eval_script_list_py(
     apply_test_patch_command = (
         f"git apply -v - <<'{HEREDOC_DELIMITER}'\n{test_patch}\n{HEREDOC_DELIMITER}"
     )
-    test_command = " ".join(
-        [
-            MAP_REPO_VERSION_TO_SPECS[instance["repo"]][instance["version"]][
-                "test_cmd"
-            ],
-            *get_test_directives(instance),
-        ]
-    )
+    test_cmd = MAP_REPO_VERSION_TO_SPECS[instance["repo"]][instance["version"]][
+        "test_cmd"
+    ]
+    if isinstance(test_cmd, list):
+        test_cmd = " ".join(str(c) for c in test_cmd)
+    if pytest_cmd_has_scoped_paths(test_cmd):
+        test_command = str(test_cmd)
+    else:
+        test_command = " ".join([str(test_cmd), *get_test_directives(instance)])
     eval_commands = [
         "source /opt/miniconda3/bin/activate",
         f"conda activate {env_name}",

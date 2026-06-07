@@ -91,6 +91,10 @@ def make_eval_script_list_common(
     if "build" in specs:
         extend_commands(build_commands, specs["build"])
 
+    pre_test_commands: list[str] = []
+    if "eval_commands" in specs:
+        extend_commands(pre_test_commands, specs["eval_commands"])
+
     apply_test_patch_command = f"git apply --verbose --reject - <<'{HEREDOC_DELIMITER}'\n{test_patch}\n{HEREDOC_DELIMITER}"
     test_commands = get_test_cmds(instance)
     eval_commands = [
@@ -104,6 +108,7 @@ def make_eval_script_list_common(
         reset_tests_command,
         apply_test_patch_command,
         *build_commands,
+        *pre_test_commands,
         f": '{START_TEST_OUTPUT}'",
         *test_commands,
         f": '{END_TEST_OUTPUT}'",

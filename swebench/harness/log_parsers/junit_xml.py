@@ -59,12 +59,19 @@ def _junit_file_to_repo_relpath(rel_s: str, repo_root: Path) -> str:
             return Path(s).resolve().relative_to(repo_root.resolve()).as_posix()
         except (ValueError, OSError):
             pass
+    while s.startswith("./"):
+        s = s[2:]
     return s.lstrip("/")
 
 
 def _is_js_test_relpath(rel: str) -> bool:
     low = rel.lower()
     return any(low.endswith(ext) for ext in _JS_TEST_EXTENSIONS)
+
+
+def _path_likely_rspec(rel: str) -> bool:
+    low = rel.lower()
+    return low.endswith("_spec.rb") or "/spec/" in low
 
 
 def _resolve_repo_test_path(repo_root: Path, rel: str) -> str | None:
@@ -75,6 +82,8 @@ def _resolve_repo_test_path(repo_root: Path, rel: str) -> str | None:
     if (root / rel).is_file():
         return rel
     if _is_js_test_relpath(rel) and (root / Path(rel).name).is_file():
+        return Path(rel).name
+    if _path_likely_rspec(rel) and (root / Path(rel).name).is_file():
         return Path(rel).name
     return None
 
@@ -197,6 +206,70 @@ def _case_outcome(case: ET.Element) -> str:
     return TestStatus.PASSED.value
 
 
+def _rspec_junit_classname_is_dotted_spec_path(classname: str, rel_s: str) -> bool:
+    """
+    True when ``rspec_junit_formatter`` puts the spec file in ``classname``.
+
+    That reporter emits either:
+
+    * **Group + example** — ``classname`` is the nested example group (often
+      contains ``::`` or spaces), ``name`` is the short example title, and the
+      spec path comes from ``testsuite/@file`` or ``testcase/@file``.
+    * **Full example in name** — ``classname`` is a dotted spec path such as
+      ``spec.rubocop.version_spec``, and ``name`` already contains the full
+      ``group example`` text used in rubric keys.
+    """
+    if not classname:
+        return False
+    if "::" in classname or " " in classname:
+        return False
+    cn = classname.replace("\\", ".").strip(".")
+    if not cn or "/" in cn:
+        return False
+
+    if rel_s:
+        rel_norm = rel_s.replace("\\", "/").lstrip("./")
+        dotted_rel = rel_norm.removesuffix(".rb").replace("/", ".")
+        stem = Path(rel_norm).stem
+        if cn == dotted_rel or cn == stem:
+            return True
+
+    if cn.startswith("spec.") and cn.endswith("_spec"):
+        return True
+    return False
+
+
+def junit_case_to_rspec_nodeid(
+    case: ET.Element,
+    repo_root: Path,
+    *,
+    suite_file: str | None = None,
+) -> str:
+    """Node id aligned with taskgen RSpec labels (``path::group example``)."""
+    name = (case.attrib.get("name") or "").strip()
+    classname = (case.attrib.get("classname") or "").strip()
+    file_a = case.attrib.get("file") or suite_file
+    rel_s = ""
+    if file_a:
+        rel_s = _junit_file_to_repo_relpath(str(file_a), repo_root)
+        resolved = _resolve_repo_test_path(repo_root, rel_s)
+        if resolved:
+            rel_s = resolved
+    if rel_s:
+        if name and _rspec_junit_classname_is_dotted_spec_path(classname, rel_s):
+            return f"{rel_s}::{name}"
+        if classname and name and classname != name and not classname.startswith(rel_s):
+            return f"{rel_s}::{classname} {name}".strip()
+        if name:
+            return f"{rel_s}::{name}"
+        if classname:
+            return f"{rel_s}::{classname}"
+        return rel_s
+    if classname:
+        return f"{classname}::{name}" if name else classname
+    return name
+
+
 def junit_case_to_nodeid(
     case: ET.Element,
     repo_root: Path,
@@ -255,13 +328,22 @@ def junit_case_to_nodeid(
     return f"{classname}::{name}" if classname else name
 
 
-def parse_junit_xml_file(path: Path, repo_root: Path) -> dict[str, str]:
+def parse_junit_xml_file(
+    path: Path,
+    repo_root: Path,
+    *,
+    specs: dict | None = None,
+) -> dict[str, str]:
     root, _ = _junit_xml_roots(path)
     if root is None:
         return {}
+    use_rspec = specs_use_rspec_junit((specs or {}).get("test_cmd"))
     out: dict[str, str] = {}
     for case, suite_file in _walk_testcases_with_suite_file(root):
-        nid = junit_case_to_nodeid(case, repo_root, suite_file=suite_file)
+        if use_rspec:
+            nid = junit_case_to_rspec_nodeid(case, repo_root, suite_file=suite_file)
+        else:
+            nid = junit_case_to_nodeid(case, repo_root, suite_file=suite_file)
         out[nid] = _case_outcome(case)
     return out
 
@@ -340,12 +422,25 @@ def should_use_vitest_junit_xml(specs: dict) -> bool:
     )
 
 
+def specs_use_rspec_junit(test_cmd: str | list[str] | None) -> bool:
+    """True when ``test_cmd`` runs RSpec with JUnit output (rubric JSONL layout)."""
+    if isinstance(test_cmd, list):
+        test_cmd = " ".join(str(c) for c in test_cmd)
+    low = str(test_cmd or "").lower()
+    compact = low.replace(" ", "")
+    return "rspec" in low and (
+        "rspecjunitformatter" in compact
+        or JUNIT_OUT_PLACEHOLDER.lower() in low
+    )
+
+
 def should_use_junit_xml_file(specs: dict) -> bool:
-    """True when rubric tasks emit JUnit XML (Vitest, Jest+jest-junit, or Mocha)."""
+    """True when rubric tasks emit JUnit XML (Vitest, Jest, Mocha, or RSpec)."""
     return (
         should_use_vitest_junit_xml(specs)
         or specs_use_jest_junit(specs.get("test_cmd"))
         or specs_use_mocha_junit(specs.get("test_cmd"))
+        or specs_use_rspec_junit(specs.get("test_cmd"))
     )
 
 

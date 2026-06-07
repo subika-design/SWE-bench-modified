@@ -19,6 +19,8 @@ def normalize_test_nodeid(nodeid: str) -> str:
         return nodeid
     parts = [p.strip() for p in nodeid.split("::")]
     parts = [p for p in parts if p]
+    if parts:
+        parts[0] = parts[0].replace("\\", "/").strip().lstrip("./")
     if len(parts) >= 3 and parts[0] == parts[1]:
         parts = [parts[0], *parts[2:]]
     return "::".join(parts)
